@@ -2,13 +2,16 @@ import time
 import argparse
 import utils
 from data_loader import DataLoader
-from generate_model_predictions import sacrebleu_metric, compute_bleu
+from generate_model_predictions import sacrebleu_metric, compute_bleu, sequences_to_texts_batch
 import tensorflow as tf
 import os
 import json
 import sacrebleu
 from transformer import create_masks
+import tensorflow_probability as tfp
 
+lambda_1 = 0.5
+lambda_2 = 0.5
 
 def get_bleu_score(sys, refs):
     """
@@ -19,37 +22,26 @@ def get_bleu_score(sys, refs):
     bleu = sacrebleu.corpus_bleu([sys], [[refs]])
     return bleu.score
 
-#%%
-import tensorflow_probability as tfp
-import numpy as np
-
-a = np.random.randn(2,4,3)
-p = tfp.distributions.Categorical(logits=a)
-p.log_prob(p.sample())
-
-# p.sample().numpy()
-
-#%%
 
 
-#%%
-
-
-
-def sample_sent(sent, greedy):
+def get_sample_sent(sent, greedy=True):
     if greedy:
-        pass
+        sent = tf.argmax(sent, axis=-1)
+        return sent, None
     else:
-        pass
+        sent_dist = tfp.distributions.Categorical(1, logits = sent) # batch X seq-len
+        sent_sample = sent_dist.sample()
+        sent_log_prob = sent_dist.log_prob(sent_sample)
+        return sent_sample, sent_log_prob
 
 
-def get_rl_loss(real, pred):
-    sample_sent, log_probs = sample_sent(pred, greedy=True)
-    greedy_sent, _ = sample_sent(pred, greedy=True)
+def get_rl_loss(real, pred, tokenizer_tar):
+    sample_sents, log_probs = get_sample_sent(pred, greedy=False)
+    greedy_sents, _ = get_sample_sent(pred, greedy=True)
 
-    sample_reward = get_bleu_score(sample_sent, real)
-    baseline_reward = get_bleu_score(greedy_sent, real)
-
+    sample_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, sample_sents), real)
+    baseline_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, greedy_sents), real)
+    
     rl_loss = -(sample_reward - baseline_reward) * log_probs
     rl_loss = rl_loss.mean()
 
@@ -58,7 +50,7 @@ def get_rl_loss(real, pred):
 
 # Since the target sequences are padded, it is important
 # to apply a padding mask when calculating the loss.
-def loss_function(real, pred, loss_object, pad_token_id):
+def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id):
     """Calculates total loss containing cross entropy with padding ignored.
       Args:
         real: Tensor of size [batch_size, length_logits, vocab_size]
@@ -68,16 +60,20 @@ def loss_function(real, pred, loss_object, pad_token_id):
       Returns:
         A scalar float tensor for loss.
     """
-    rl_loss = get_rl_loss(real, pred)
+    rl_loss = get_rl_loss(real, pred, tokenizer_tar)
     mask = tf.math.logical_not(tf.math.equal(real, pad_token_id))
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
-    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+
+    rl_loss *= mask 
+
+    combined_loss = lambda_1*loss_ + lambda_2*rl_loss
+    return tf.reduce_sum(combined_loss) / tf.reduce_sum(mask)
 
 
 def train_step(model, loss_object, optimizer, inp, tar,
-               train_loss, train_accuracy, pad_token_id):
+               train_loss, train_accuracy, tokenizer_tar, pad_token_id):
     tar_inp = tar[:, :-1]
     tar_real = tar[:, 1:]
 
@@ -91,7 +87,7 @@ def train_step(model, loss_object, optimizer, inp, tar,
                                enc_padding_mask,
                                combined_mask,
                                dec_padding_mask)
-        loss = loss_function(tar_real, predictions, loss_object, pad_token_id)
+        loss = loss_function(tar_real, predictions, loss_object, tokenizer_tar, pad_token_id)
 
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -204,7 +200,7 @@ def do_training(user_config):
         # inp -> english, tar -> french
         for (batch, (inp, tar, _)) in enumerate(train_dataset):
             train_step(transformer_model, loss_object, optimizer, inp, tar,
-                       train_loss, train_accuracy, pad_token_id=tokenizer_tar.pad_token_id)
+                       train_loss, train_accuracy, tokenizer_tar, pad_token_id=tokenizer_tar.pad_token_id)
 
             if batch % 50 == 0:
                 print('Train: Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
