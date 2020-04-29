@@ -43,7 +43,6 @@ def generate_predictions(input_file_path: str, pred_file_path: str):
                   pred_file_path=pred_file_path)
     # MODIFY ABOVE #
 
-
 def compute_bleu(pred_file_path: str, target_file_path: str, print_all_scores: bool):
     """
 
