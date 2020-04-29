@@ -6,6 +6,7 @@ from generate_model_predictions import sacrebleu_metric, compute_bleu
 import tensorflow as tf
 import os
 import json
+import sacrebleu
 from transformer import create_masks
 
 
@@ -68,6 +69,15 @@ def val_step(model, loss_object, inp, tar,
 
     val_loss(loss)
     val_accuracy(tar_real, predictions)
+
+def get_bleu_score(sys, refs):
+    """
+    :param sys: sentence 1
+    :param refs: sentence 2
+    :return: bleu score
+    """
+    bleu = sacrebleu.corpus_bleu([sys], [[refs]])
+    return bleu.score
 
 
 def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, epoch):
