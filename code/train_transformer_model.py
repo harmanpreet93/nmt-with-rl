@@ -9,6 +9,7 @@ import json
 import sacrebleu
 from transformer import create_masks
 import tensorflow_probability as tfp
+import numpy as np
 
 lambda_1 = 0.5
 lambda_2 = 0.5
@@ -20,7 +21,8 @@ def get_bleu_score(sys, refs):
     :param refs: sentence 2
     :return: bleu score
     """
-    bleu = sacrebleu.corpus_bleu([sys], [[refs]])
+    bleu = sacrebleu.corpus_bleu(sys, [refs])
+    # TODO: bleu score 0 if length less than 3
     return bleu.score
 
 
@@ -29,7 +31,7 @@ def get_sample_sent(sent, greedy=True):
         sent = tf.argmax(sent, axis=-1)
         return sent, None
     else:
-        sent_dist = tfp.distributions.Categorical(sent) # batch X seq-len
+        sent_dist = tfp.distributions.Categorical(sent)  # batch X seq-len
         sent_sample = sent_dist.sample()
         sent_log_prob = sent_dist.log_prob(sent_sample)
         return sent_sample, sent_log_prob
@@ -41,13 +43,11 @@ def get_rl_loss(real, pred, tokenizer_tar):
 
     sample_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, sample_sents), real)
     baseline_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, greedy_sents), real)
-    
+
     rl_loss = -(sample_reward - baseline_reward) * log_probs
-    rl_loss = rl_loss.mean()
+    batch_reward = np.array(sample_reward).mean()
 
-    batch_reward = sample_reward.mean()
-
-    return rl_loss
+    return rl_loss, batch_reward
 
 
 # Since the target sequences are padded, it is important
@@ -67,10 +67,8 @@ def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id):
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
-
-    rl_loss *= mask 
-
-    combined_loss = lambda_1*loss_ + lambda_2*rl_loss
+    rl_loss *= mask
+    combined_loss = lambda_1 * loss_ + lambda_2 * rl_loss
     return tf.reduce_sum(combined_loss) / tf.reduce_sum(mask)
 
 
