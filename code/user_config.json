@@ -20,7 +20,7 @@
   "dummy_data_path_fr": "../data/dummy_fr_sample.txt",
   "tokenizer_path_en": "../tokenizer_data_en_30k",
   "tokenizer_path_fr": "../tokenizer_data_fr_30k",
-  "use_pretrained_emb": true,
+  "use_pretrained_emb": false,
   "pretrained_emb_path_en": "../pretrained_embeddings/tf_bert_for_masked_lm_epoch_16_loss_9.00_30k_en.npy",
   "pretrained_emb_path_fr": "../pretrained_embeddings/tf_bert_for_masked_lm_epoch_27_loss_8.78_30k_fr.npy",
   "max_length_en": 80,

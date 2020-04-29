@@ -10,6 +10,31 @@ import sacrebleu
 from transformer import create_masks
 
 
+def get_bleu_score(sys, refs):
+    """
+    :param sys: sentence 1
+    :param refs: sentence 2
+    :return: bleu score
+    """
+    bleu = sacrebleu.corpus_bleu([sys], [[refs]])
+    return bleu.score
+
+#%%
+import tensorflow_probability as tfp
+import numpy as np
+
+a = np.random.randn(2,4,3)
+p = tfp.distributions.Categorical(logits=a)
+p.log_prob(p.sample())
+
+# p.sample().numpy()
+
+#%%
+
+
+#%%
+
+
 
 def sample_sent(sent, greedy):
     if greedy:
@@ -24,11 +49,12 @@ def get_rl_loss(real, pred):
 
     sample_reward = get_bleu_score(sample_sent, real)
     baseline_reward = get_bleu_score(greedy_sent, real)
-    
+
     rl_loss = -(sample_reward - baseline_reward) * log_probs
     rl_loss = rl_loss.mean()
 
     return rl_loss
+
 
 # Since the target sequences are padded, it is important
 # to apply a padding mask when calculating the loss.
@@ -90,15 +116,6 @@ def val_step(model, loss_object, inp, tar,
 
     val_loss(loss)
     val_accuracy(tar_real, predictions)
-
-def get_bleu_score(sys, refs):
-    """
-    :param sys: sentence 1
-    :param refs: sentence 2
-    :return: bleu score
-    """
-    bleu = sacrebleu.corpus_bleu([sys], [[refs]])
-    return bleu.score
 
 
 def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, epoch):
