@@ -9,6 +9,26 @@ import json
 from transformer import create_masks
 
 
+
+def sample_sent(sent, greedy):
+    if greedy:
+        pass
+    else:
+        pass
+
+
+def get_rl_loss(real, pred):
+    sample_sent, log_probs = sample_sent(pred, greedy=True)
+    greedy_sent, _ = sample_sent(pred, greedy=True)
+
+    sample_reward = get_bleu_score(sample_sent, real)
+    baseline_reward = get_bleu_score(greedy_sent, real)
+    
+    rl_loss = -(sample_reward - baseline_reward) * log_probs
+    rl_loss = rl_loss.mean()
+
+    return rl_loss
+
 # Since the target sequences are padded, it is important
 # to apply a padding mask when calculating the loss.
 def loss_function(real, pred, loss_object, pad_token_id):
@@ -21,6 +41,7 @@ def loss_function(real, pred, loss_object, pad_token_id):
       Returns:
         A scalar float tensor for loss.
     """
+    rl_loss = get_rl_loss(real, pred)
     mask = tf.math.logical_not(tf.math.equal(real, pad_token_id))
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
