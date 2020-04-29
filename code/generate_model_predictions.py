@@ -85,6 +85,13 @@ def sequences_to_texts(tokenizer, pred):
     return decoded_text
 
 
+def sequences_to_texts_batch(tokenizer, pred_batch):
+    decoded_text_batch = []
+    for pred in pred_batch:
+        decoded_text_batch.append(sequences_to_texts(tokenizer, pred))
+    return decoded_text_batch
+
+
 def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path):
     inp_language = user_config["inp_language"]
     target_language = user_config["target_language"]
