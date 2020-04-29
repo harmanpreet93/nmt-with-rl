@@ -11,6 +11,7 @@ from transformer import create_masks
 import tensorflow_probability as tfp
 import numpy as np
 
+
 def get_bleu_score(sys, refs):
     """
     :param sys: sentence 1
@@ -210,7 +211,8 @@ def do_training(user_config):
         # inp -> english, tar -> french
         for (batch, (inp, tar, _)) in enumerate(train_dataset):
             train_batch_reward.append(train_step(transformer_model, loss_object, optimizer, inp, tar,
-                       train_loss, train_accuracy, tokenizer_tar, pad_token_id=tokenizer_tar.pad_token_id, use_rl=True))
+                                                 train_loss, train_accuracy, tokenizer_tar,
+                                                 pad_token_id=tokenizer_tar.pad_token_id, use_rl=True))
 
             if batch % 50 == 0:
                 print('Train: Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
@@ -227,7 +229,8 @@ def do_training(user_config):
         # inp -> english, tar -> french
         for (batch, (inp, tar, _)) in enumerate(val_dataset):
             val_batch_reward.append(val_step(transformer_model, loss_object, inp, tar,
-                     val_loss, val_accuracy, tokenizer_tar, pad_token_id=tokenizer_tar.pad_token_id, use_rl=True))
+                                             val_loss, val_accuracy, tokenizer_tar,
+                                             pad_token_id=tokenizer_tar.pad_token_id, use_rl=True))
         print('Val Loss: {:.4f}, Val Accuracy: {:.4f}'.format(val_loss.result(), val_accuracy.result()))
         print("Val reward {}".format(np.mean(val_batch_reward)))
 

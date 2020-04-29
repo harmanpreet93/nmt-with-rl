@@ -103,17 +103,6 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
     tokenizer_inp, tokenizer_tar = utils.load_tokenizers(inp_language, target_language, user_config)
 
     print("****Initializing DataLoader****")
-    # dummy data loader. required for loading checkpoint
-    dummy_dataloader = DataLoader(user_config["transformer_batch_size"],
-                                  user_config["dummy_data_path_{}".format(inp_language)],
-                                  None,
-                                  tokenizer_inp,
-                                  tokenizer_tar,
-                                  inp_language,
-                                  target_language,
-                                  False)
-    dummy_dataset = dummy_dataloader.get_data_loader()
-
     # data loader
     test_dataloader = DataLoader(user_config["transformer_batch_size"],
                                  input_file_path,
@@ -125,6 +114,19 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
                                  False)
     test_dataset = test_dataloader.get_data_loader()
 
+
+    '''
+    # dummy data loader. required for loading checkpoint
+    dummy_dataloader = DataLoader(user_config["transformer_batch_size"],
+                                  user_config["dummy_data_path_{}".format(inp_language)],
+                                  None,
+                                  tokenizer_inp,
+                                  tokenizer_tar,
+                                  inp_language,
+                                  target_language,
+                                  False)
+    dummy_dataset = dummy_dataloader.get_data_loader()
+    
     input_vocab_size = tokenizer_inp.vocab_size
     target_vocab_size = tokenizer_tar.vocab_size
 
@@ -156,11 +158,17 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
                      dummy_dataset,
                      tokenizer_tar.MAX_LENGTH
                      )
-
+    
     print("****Loading Model****")
     # load model
     model_path = user_config["model_file"]
     transformer_model.load_weights(model_path)
+    '''
+
+    print("****Loading transformer model****")
+    # load model and optimizer
+    transformer_model, optimizer, ckpt_manager = \
+        utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
 
     print("****Generating Translations****")
     sacrebleu_metric(transformer_model,
