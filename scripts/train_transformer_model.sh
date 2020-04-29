@@ -5,8 +5,8 @@
 #SBATCH --mem=12G
 # --reservation=IFT6759_2020-04-10
 
-module load python/3.7
-source /home/guest140/harman_venv/bin/activate
+#module load python/3.7
+#source /home/guest140/harman_venv/bin/activate
 
 echo
 date

@@ -5,6 +5,8 @@ from pretrained_tokenizer import Tokenizer
 from transformer import Transformer, CustomSchedule
 import numpy as np
 import tensorflow as tf
+import pickle
+import re
 
 
 def set_seed(seed):
@@ -22,28 +24,63 @@ def load_file(path):
         return json.load(fd)
 
 
-def load_tokenizers(inp_language, target_language, user_config):
+
+def tokenize(aligned_lang, unaligned_lang, num_words):
+    lang_tokenizer = tf.keras.preprocessing.text.Tokenizer(filters=' ', lower=False, num_words=num_words)
+    lang_tokenizer.fit_on_texts(aligned_lang + unaligned_lang)
+    tensor = lang_tokenizer.texts_to_sequences(aligned_lang)
+    tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
+    return tensor, lang_tokenizer
+
+def preprocess_sentence(w, lang, aligned=True, add_special_tag=True):
+    w = w.strip()
+    if lang == "en" and not aligned:
+        # This part is required only for english unaligned samples in word2vec
+        # w = unicode_to_ascii(w.lower())
+        # Removing everything except(letters)
+        w = re.sub(r"[^a-z]+", " ", w)
+    if lang == "fr" and not aligned:
+        # Adding space with punctuation for easy split.
+        w = re.sub(r"([?.!,¿])", r" \1 ", w)
+        w = re.sub(r'[" "]+', " ", w)
+    w = w.strip()
+    # currently keeping these tags for both type of data
+    if add_special_tag:
+        w = '<start> ' + w + ' <end>'
+    return w
+
+def load_tokenizers():
     """
-    load pre-trained tokenizer for input and target language
+        load pre-trained tokenizer for input and target language
     """
 
-    pretrained_tokenizer_path_inp = user_config["tokenizer_path_{}".format(inp_language)]
-    pretrained_tokenizer_path_tar = user_config["tokenizer_path_{}".format(target_language)]
-
-    tokenizer_inp = Tokenizer(inp_language, pretrained_tokenizer_path_inp,
-                              max_length=user_config["max_length_{}".format(inp_language)])
-    tokenizer_tar = Tokenizer(target_language, pretrained_tokenizer_path_tar,
-                              max_length=user_config["max_length_{}".format(target_language)])
+    tokenizer_inp = pickle.load(open("../tokenizers/input_tokenizer.pkl", "rb"))
+    tokenizer_tar = pickle.load(open("../tokenizers/target_tokenizer.pkl", "rb"))
 
     return tokenizer_inp, tokenizer_tar
+
+# def load_tokenizers(inp_language, target_language, user_config):
+#     """
+#     load pre-trained tokenizer for input and target language
+#     """
+#
+#     pretrained_tokenizer_path_inp = user_config["tokenizer_path_{}".format(inp_language)]
+#     pretrained_tokenizer_path_tar = user_config["tokenizer_path_{}".format(target_language)]
+#
+#     tokenizer_inp = Tokenizer(inp_language, pretrained_tokenizer_path_inp,
+#                               max_length=user_config["max_length_{}".format(inp_language)])
+#     tokenizer_tar = Tokenizer(target_language, pretrained_tokenizer_path_tar,
+#                               max_length=user_config["max_length_{}".format(target_language)])
+#
+#     return tokenizer_inp, tokenizer_tar
 
 
 def load_transformer_model(user_config, tokenizer_inp, tokenizer_tar):
     """
     load transformer model and latest checkpoint to continue training
     """
-    input_vocab_size = tokenizer_inp.vocab_size
-    target_vocab_size = tokenizer_tar.vocab_size
+    input_vocab_size = 20000
+    target_vocab_size = 20000
     inp_language = user_config["inp_language"]
     target_language = user_config["target_language"]
 
