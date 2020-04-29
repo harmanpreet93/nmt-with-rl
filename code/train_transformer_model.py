@@ -10,8 +10,10 @@ import sacrebleu
 from transformer import create_masks
 
 
+lambda_1 = 0.5
+lambda_2 = 0.5
 
-def sample_sent(sent, greedy):
+def get_sample_sent(sent, greedy=True):
     if greedy:
         pass
     else:
@@ -19,8 +21,8 @@ def sample_sent(sent, greedy):
 
 
 def get_rl_loss(real, pred):
-    sample_sent, log_probs = sample_sent(pred, greedy=True)
-    greedy_sent, _ = sample_sent(pred, greedy=True)
+    sample_sent, log_probs = get_sample_sent(pred, greedy=True)
+    greedy_sent, _ = get_sample_sent(pred, greedy=True)
 
     sample_reward = get_bleu_score(sample_sent, real)
     baseline_reward = get_bleu_score(greedy_sent, real)
@@ -47,7 +49,11 @@ def loss_function(real, pred, loss_object, pad_token_id):
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
-    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+
+    rl_loss *= mask 
+
+    combined_loss = lambda_1*loss_ + lambda_2*rl_loss
+    return tf.reduce_sum(combined_loss) / tf.reduce_sum(mask)
 
 
 def train_step(model, loss_object, optimizer, inp, tar,
