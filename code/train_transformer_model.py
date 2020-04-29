@@ -13,6 +13,7 @@ import tensorflow_probability as tfp
 lambda_1 = 0.5
 lambda_2 = 0.5
 
+
 def get_bleu_score(sys, refs):
     """
     :param sys: sentence 1
@@ -23,13 +24,12 @@ def get_bleu_score(sys, refs):
     return bleu.score
 
 
-
 def get_sample_sent(sent, greedy=True):
     if greedy:
         sent = tf.argmax(sent, axis=-1)
         return sent, None
     else:
-        sent_dist = tfp.distributions.Categorical(1, logits = sent) # batch X seq-len
+        sent_dist = tfp.distributions.Categorical(sent) # batch X seq-len
         sent_sample = sent_dist.sample()
         sent_log_prob = sent_dist.log_prob(sent_sample)
         return sent_sample, sent_log_prob
@@ -44,6 +44,8 @@ def get_rl_loss(real, pred, tokenizer_tar):
     
     rl_loss = -(sample_reward - baseline_reward) * log_probs
     rl_loss = rl_loss.mean()
+
+    batch_reward = sample_reward.mean()
 
     return rl_loss
 
