@@ -11,10 +11,6 @@ from transformer import create_masks
 import tensorflow_probability as tfp
 import numpy as np
 
-lambda_1 = 0.5
-lambda_2 = 0.5
-
-
 def get_bleu_score(sys, refs):
     """
     :param sys: sentence 1
@@ -41,8 +37,11 @@ def get_rl_loss(real, pred, tokenizer_tar):
     sample_sents, log_probs = get_sample_sent(pred, greedy=False)
     greedy_sents, _ = get_sample_sent(pred, greedy=True)
 
-    sample_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, sample_sents), real)
-    baseline_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, greedy_sents), real)
+    sample_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, sample_sents),
+                                   sequences_to_texts_batch(tokenizer_tar, real))
+
+    baseline_reward = get_bleu_score(sequences_to_texts_batch(tokenizer_tar, greedy_sents),
+                                     sequences_to_texts_batch(tokenizer_tar, real))
 
     rl_loss = -(sample_reward - baseline_reward) * log_probs
     batch_reward = np.array(sample_reward).mean()
@@ -52,28 +51,33 @@ def get_rl_loss(real, pred, tokenizer_tar):
 
 # Since the target sequences are padded, it is important
 # to apply a padding mask when calculating the loss.
-def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id):
+def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id, use_rl=True):
     """Calculates total loss containing cross entropy with padding ignored.
       Args:
         real: Tensor of size [batch_size, length_logits, vocab_size]
         pred: Tensor of size [batch_size, length_labels]
         loss_object: Cross entropy loss
+        tokenizer_tar: tokenizer
         pad_token_id: Pad token id to ignore
       Returns:
         A scalar float tensor for loss.
     """
-    rl_loss = get_rl_loss(real, pred, tokenizer_tar)
     mask = tf.math.logical_not(tf.math.equal(real, pad_token_id))
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
-    rl_loss *= mask
-    combined_loss = lambda_1 * loss_ + lambda_2 * rl_loss
-    return tf.reduce_sum(combined_loss) / tf.reduce_sum(mask)
+    if use_rl:
+        rl_loss, batch_reward = get_rl_loss(real, pred, tokenizer_tar)
+        rl_loss *= mask
+        combined_loss = lambda_1 * loss_ + lambda_2 * rl_loss
+    else:
+        combined_loss = loss_
+        batch_reward = 0
+    return tf.reduce_sum(combined_loss) / tf.reduce_sum(mask), batch_reward
 
 
 def train_step(model, loss_object, optimizer, inp, tar,
-               train_loss, train_accuracy, tokenizer_tar, pad_token_id):
+               train_loss, train_accuracy, tokenizer_tar, pad_token_id, use_rl=True):
     tar_inp = tar[:, :-1]
     tar_real = tar[:, 1:]
 
@@ -87,17 +91,19 @@ def train_step(model, loss_object, optimizer, inp, tar,
                                enc_padding_mask,
                                combined_mask,
                                dec_padding_mask)
-        loss = loss_function(tar_real, predictions, loss_object, tokenizer_tar, pad_token_id)
+
+        loss, batch_reward = loss_function(tar_real, predictions, loss_object, tokenizer_tar, pad_token_id, use_rl)
 
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
     train_loss(loss)
     train_accuracy(tar_real, predictions)
+    return batch_reward
 
 
 def val_step(model, loss_object, inp, tar,
-             val_loss, val_accuracy, pad_token_id):
+             val_loss, val_accuracy, tokenizer_tar, pad_token_id, use_rl=True):
     tar_inp = tar[:, :-1]
     tar_real = tar[:, 1:]
 
@@ -108,10 +114,11 @@ def val_step(model, loss_object, inp, tar,
                            enc_padding_mask,
                            combined_mask,
                            dec_padding_mask)
-    loss = loss_function(tar_real, predictions, loss_object, pad_token_id)
+    loss, batch_reward = loss_function(tar_real, predictions, loss_object, tokenizer_tar, pad_token_id, use_rl)
 
     val_loss(loss)
     val_accuracy(tar_real, predictions)
+    return batch_reward
 
 
 def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, epoch):
@@ -182,6 +189,9 @@ def do_training(user_config):
     val_loss = tf.keras.metrics.Mean(name='val_loss')
     val_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='val_accuracy')
 
+    train_batch_reward = []
+    val_batch_reward = []
+
     print("****Loading transformer model****")
     # load model and optimizer
     transformer_model, optimizer, ckpt_manager = \
@@ -199,32 +209,27 @@ def do_training(user_config):
 
         # inp -> english, tar -> french
         for (batch, (inp, tar, _)) in enumerate(train_dataset):
-            train_step(transformer_model, loss_object, optimizer, inp, tar,
-                       train_loss, train_accuracy, tokenizer_tar, pad_token_id=tokenizer_tar.pad_token_id)
+            train_batch_reward.append(train_step(transformer_model, loss_object, optimizer, inp, tar,
+                       train_loss, train_accuracy, tokenizer_tar, pad_token_id=tokenizer_tar.pad_token_id, use_rl=True))
 
             if batch % 50 == 0:
                 print('Train: Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
                     epoch + 1, batch, train_loss.result(), train_accuracy.result()))
+                print("Train reward {}".format(np.mean(train_batch_reward)))
 
-            if (batch + 1) % 2200 == 0:
-                # inp -> english, tar -> french
-                for (_, (inp, tar, _)) in enumerate(val_dataset):
-                    val_step(transformer_model, loss_object, inp, tar,
-                             val_loss, val_accuracy, pad_token_id=tokenizer_tar.pad_token_id)
-                print('Batch {}: Val Loss: {:.4f}, Val Accuracy: {:.4f}\n'.format(batch, val_loss.result(),
-                                                                                  val_accuracy.result()))
-                if user_config["compute_bleu"]:
-                    print("\nComputing BLEU at batch {}: ".format(batch))
-                    compute_bleu_score(transformer_model, val_dataset, user_config, tokenizer_tar, batch * epoch + 1)
+            if user_config["compute_bleu"]:
+                print("\nComputing BLEU at batch {}: ".format(batch))
+                compute_bleu_score(transformer_model, val_dataset, user_config, tokenizer_tar, batch * epoch + 1)
 
         print("After {} epochs".format(epoch + 1))
         print('Train Loss: {:.4f}, Train Accuracy: {:.4f}'.format(train_loss.result(), train_accuracy.result()))
 
         # inp -> english, tar -> french
         for (batch, (inp, tar, _)) in enumerate(val_dataset):
-            val_step(transformer_model, loss_object, inp, tar,
-                     val_loss, val_accuracy, pad_token_id=tokenizer_tar.pad_token_id)
+            val_batch_reward.append(val_step(transformer_model, loss_object, inp, tar,
+                     val_loss, val_accuracy, tokenizer_tar, pad_token_id=tokenizer_tar.pad_token_id, use_rl=True))
         print('Val Loss: {:.4f}, Val Accuracy: {:.4f}'.format(val_loss.result(), val_accuracy.result()))
+        print("Val reward {}".format(np.mean(val_batch_reward)))
 
         print('Time taken for training epoch {}: {} secs'.format(epoch + 1, time.time() - start))
 
@@ -237,12 +242,17 @@ def do_training(user_config):
 
 
 def main():
+    global lambda_1
+    global lambda_2
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="Configuration file containing training parameters", type=str)
     args = parser.parse_args()
     user_config = utils.load_file(args.config)
     seed = user_config["random_seed"]
     utils.set_seed(seed)
+
+    lambda_1 = 0.4
+    lambda_2 = 0.6
     print(json.dumps(user_config, indent=2))
     do_training(user_config)
 
