@@ -5,8 +5,8 @@
 #SBATCH --mem=12G
 # --reservation=IFT6759_2020-04-10
 
-module load python/3.7
-source /project/cq-training-1/project2/submissions/team08/s_env/bin/activate
+# module load python/3.7
+# source /project/cq-training-1/project2/submissions/team08/s_env/bin/activate
 
 date
 echo ~~~~~~~~~~~~Evaluating Transformer model

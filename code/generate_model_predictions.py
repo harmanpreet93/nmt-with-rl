@@ -4,7 +4,6 @@ from evaluator import compute_bleu
 from transformer import Transformer, create_masks
 import utils
 import tensorflow as tf
-import numpy as np
 import os
 import json
 
@@ -15,7 +14,7 @@ def sacrebleu_metric(model, pred_file_path, target_file_path, tokenizer_tar, tes
     if target_file_path is None:
         with open(pred_file_path, "w", buffering=1) as f_pred:
             # evaluations possibly faster in batches
-            for batch, (inp_seq, _, tar) in enumerate(test_dataset):
+            for batch, (inp_seq, _) in enumerate(test_dataset):
                 if (batch + 1) % 2 == 0:
                     print("Evaluating batch {}".format(batch))
                 translated_batch = translate_batch(model, inp_seq, tokenizer_tar, max_length)
@@ -34,15 +33,14 @@ def sacrebleu_metric(model, pred_file_path, target_file_path, tokenizer_tar, tes
 
 def translate_batch(model, inp, tokenizer_tar, max_length):
     output, _ = evaluate_batch(model, inp, tokenizer_tar, max_length)
-    predicted_sentences = []
-    for pred in output.numpy():
-        predicted_sentences.append(sequences_to_texts(tokenizer_tar, pred))
-    return predicted_sentences
+    pred_sentences = tokenizer_tar.sequences_to_texts(output.numpy())
+    pred_sentences = [x.split("<end>")[0].replace("<start>", "").strip() for x in pred_sentences]
+    return pred_sentences
 
 
 def evaluate_batch(model, inputs, tokenizer_tar, max_length):
     encoder_input = tf.convert_to_tensor(inputs)
-    decoder_input = tf.expand_dims([tokenizer_tar.bos_token_id] * inputs.shape[0], axis=1)
+    decoder_input = tf.expand_dims([tokenizer_tar.word_index["<start>"]] * inputs.shape[0], axis=1)
     output = decoder_input
     attention_weights = None
 
@@ -64,7 +62,7 @@ def evaluate_batch(model, inputs, tokenizer_tar, max_length):
         predicted_id = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
 
         # return the result if the predicted_id is equal to the end token
-        if (predicted_id == tokenizer_tar.eos_token_id).numpy().all():
+        if (predicted_id == tokenizer_tar.word_index["<end>"]).numpy().all():
             return output, attention_weights
             # return tf.squeeze(output, axis=0), attention_weights
 
@@ -75,21 +73,20 @@ def evaluate_batch(model, inputs, tokenizer_tar, max_length):
     return output, attention_weights
 
 
-def sequences_to_texts(tokenizer, pred):
-    # split because batch might flush output tokens even after eos token due to race conditions
-    pad_indices = tf.where(pred == tokenizer.eos_token_id)
-    if pad_indices.shape[0] > 0:
-        index = pad_indices.numpy()[0][0]
-        pred = pred[:index]
-    decoded_text = tokenizer.decode(pred)
-    return decoded_text
-
-
-def sequences_to_texts_batch(tokenizer, pred_batch):
-    decoded_text_batch = []
-    for pred in pred_batch:
-        decoded_text_batch.append(sequences_to_texts(tokenizer, pred))
-    return decoded_text_batch
+# def sequences_to_texts_(tokenizer, pred):
+#     # split because batch might flush output tokens even after eos token due to race conditions
+#     pad_indices = tf.where(pred == tokenizer.eos_token_id)
+#     if pad_indices.shape[0] > 0:
+#         index = pad_indices.numpy()[0][0]
+#         pred = pred[:index]
+#     decoded_text = tokenizer.decode(pred)
+#     return decoded_text
+#
+#
+# def sequences_to_texts_batch(tokenizer, pred_batch):
+#     pred_sentences = tokenizer.sequences_to_texts(pred_batch.numpy())
+#     # pred_sentences = [x.split("<end>")[0].replace("<start>", "").strip() for x in pred_sentences]
+#     return pred_sentences
 
 
 def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path):
@@ -100,20 +97,9 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
 
     print("****Loading Sub-Word Tokenizers****")
     # load pre-trained tokenizer
-    tokenizer_inp, tokenizer_tar = utils.load_tokenizers(inp_language, target_language, user_config)
+    tokenizer_inp, tokenizer_tar = utils.load_tokenizers()
 
     print("****Initializing DataLoader****")
-    # dummy data loader. required for loading checkpoint
-    dummy_dataloader = DataLoader(user_config["transformer_batch_size"],
-                                  user_config["dummy_data_path_{}".format(inp_language)],
-                                  None,
-                                  tokenizer_inp,
-                                  tokenizer_tar,
-                                  inp_language,
-                                  target_language,
-                                  False)
-    dummy_dataset = dummy_dataloader.get_data_loader()
-
     # data loader
     test_dataloader = DataLoader(user_config["transformer_batch_size"],
                                  input_file_path,
@@ -125,6 +111,18 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
                                  False)
     test_dataset = test_dataloader.get_data_loader()
 
+    '''
+    # dummy data loader. required for loading checkpoint
+    dummy_dataloader = DataLoader(user_config["transformer_batch_size"],
+                                  user_config["dummy_data_path_{}".format(inp_language)],
+                                  None,
+                                  tokenizer_inp,
+                                  tokenizer_tar,
+                                  inp_language,
+                                  target_language,
+                                  False)
+    dummy_dataset = dummy_dataloader.get_data_loader()
+    
     input_vocab_size = tokenizer_inp.vocab_size
     target_vocab_size = tokenizer_tar.vocab_size
 
@@ -156,11 +154,17 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
                      dummy_dataset,
                      tokenizer_tar.MAX_LENGTH
                      )
-
+    
     print("****Loading Model****")
     # load model
     model_path = user_config["model_file"]
     transformer_model.load_weights(model_path)
+    '''
+
+    print("****Loading transformer model****")
+    # load model and optimizer
+    transformer_model, optimizer, ckpt_manager = \
+        utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
 
     print("****Generating Translations****")
     sacrebleu_metric(transformer_model,
