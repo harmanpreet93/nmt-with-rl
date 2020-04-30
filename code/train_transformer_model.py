@@ -170,7 +170,7 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
 
     # append checkpoint and score to file name for easy reference
     new_path = "../logs/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
-        -1] + "_epoch-" + str(epoch) + "_prediction_{}".format(target_language) + "{:.4f}.txt".format(scores)
+        -1] + "_epoch-" + str(epoch) + "_prediction_{}_".format(target_language) + "{:.3f}.txt".format(scores)
     # append score and checkpoint name to file_name
     os.rename(pred_file_path, new_path)
     print("Saved translated prediction at {}".format(new_path))
@@ -181,12 +181,11 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
 def do_training(user_config):
     inp_language = user_config["inp_language"]
     target_language = user_config["target_language"]
-
-    print("\n****Training model from {} to {}****\n".format(inp_language, target_language))
+    print("\n****Training model from {} to {}****".format(inp_language, target_language))
     print("****Using RL: {}****".format(user_config["user_RL"]))
     print("****Tensroboard Logging: {}****".format(user_config["tensorboard_logging"]))
-
     print("****Loading tokenizers and datasets****")
+
     train_dataset, val_dataset, tokenizer_tar, tokenizer_inp = utils.get_dataset_and_tokenizer(user_config)
 
     # define loss and accuracy metrics
@@ -217,6 +216,8 @@ def do_training(user_config):
     # load model and optimizer
     transformer_model, optimizer, ckpt_manager = \
         utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
+
+    # scores = compute_bleu_score(transformer_model, val_dataset, user_config, tokenizer_tar, 1 + 1)
 
     epochs = user_config["transformer_epochs"]
     total_steps = 50000 // user_config["transformer_batch_size"] + 1

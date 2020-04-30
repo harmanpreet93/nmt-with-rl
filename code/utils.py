@@ -175,22 +175,6 @@ def load_tokenizers(user_config):
     return tokenizer_inp, tokenizer_tar
 
 
-# def load_tokenizers(inp_language, target_language, user_config):
-#     """
-#     load pre-trained tokenizer for input and target language
-#     """
-#
-#     pretrained_tokenizer_path_inp = user_config["tokenizer_path_{}".format(inp_language)]
-#     pretrained_tokenizer_path_tar = user_config["tokenizer_path_{}".format(target_language)]
-#
-#     tokenizer_inp = Tokenizer(inp_language, pretrained_tokenizer_path_inp,
-#                               max_length=user_config["max_length_{}".format(inp_language)])
-#     tokenizer_tar = Tokenizer(target_language, pretrained_tokenizer_path_tar,
-#                               max_length=user_config["max_length_{}".format(target_language)])
-#
-#     return tokenizer_inp, tokenizer_tar
-
-
 def load_transformer_model(user_config, tokenizer_inp, tokenizer_tar):
     """
     load transformer model and latest checkpoint to continue training
@@ -232,28 +216,3 @@ def load_transformer_model(user_config, tokenizer_inp, tokenizer_tar):
         print('Latest checkpoint restored from path {}'.format(ckpt_manager.latest_checkpoint))
 
     return transformer_model, optimizer, ckpt_manager
-
-
-def create_mix_dataset(synthetic_data_path_lang1, true_data_path_lang1, true_unaligned_data_path_lang2,
-                       true_data_path_lang2, num_of_times_to_add_true_data: int):
-    """
-    Mix back-translated dataset with aligned dataset in some pre-defined ratio
-    Used during iterative back-translation to maintain certain ratio of true_data:syn_data
-    """
-    assert num_of_times_to_add_true_data > 0
-
-    synthetic_data_lang1 = io.open(synthetic_data_path_lang1).read().strip().split('\n')
-    true_aligned_data_lang1 = io.open(true_data_path_lang1).read().strip().split('\n')
-    true_unaligned_data_lang2 = io.open(true_unaligned_data_path_lang2).read().strip().split('\n')
-    true_aligned_data_lang2 = io.open(true_data_path_lang2).read().strip().split('\n')
-
-    new_data_lang1, new_data_lang2 = synthetic_data_lang1, true_unaligned_data_lang2
-    for _ in range(num_of_times_to_add_true_data):
-        new_data_lang1 += true_aligned_data_lang1
-        new_data_lang2 += true_aligned_data_lang2
-
-    shuffle_together = list(zip(new_data_lang1, new_data_lang2))
-    np.random.shuffle(shuffle_together)
-    new_data_lang1, new_data_lang2 = zip(*shuffle_together)
-
-    return list(new_data_lang1), list(new_data_lang2)

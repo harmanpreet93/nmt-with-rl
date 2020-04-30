@@ -9,10 +9,10 @@ import json
 """Evaluate"""
 
 
-def sacrebleu_metric(model, pred_file_path, tokenizer_tar, test_dataset, max_length):
+def sacrebleu_metric(model, pred_file_path, tokenizer_tar, dataset, max_length):
     with open(pred_file_path, "w", buffering=1) as f_pred:
         # evaluation faster in batches
-        for batch, (inp_seq, _) in enumerate(test_dataset):
+        for batch, (inp_seq, _) in enumerate(dataset):
             print("Evaluating batch {}".format(batch))
             translated_batch = translate_batch(model, inp_seq, tokenizer_tar, max_length)
             for pred in translated_batch:
@@ -44,10 +44,13 @@ def evaluate_batch(model, inputs, tokenizer_tar, max_length):
                                                combined_mask,
                                                dec_padding_mask)
 
+
         # select the last word from the seq_len dimension
         predictions = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
 
         predicted_id = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
+
+        # print("predictions: ", predicted_id)
 
         # return the result if the predicted_id is equal to the end token
         if (predicted_id == tokenizer_tar.word_index["<end>"]).numpy().all():
