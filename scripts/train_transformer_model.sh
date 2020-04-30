@@ -15,7 +15,7 @@ echo
 
 python -u ../code/train_transformer_model.py \
             --config ../code/user_config.json \
-            2>&1 | tee -a ../log/only_DL_RL_0.25_DL_0.75.log \
+            2>&1 | tee -a ../logs/only_DL_RL_0.25_DL_0.75.log \
 
 #date
 #echo ~~~~~~~~~~~~Evaluating Transformer model

@@ -145,6 +145,7 @@ pretrained_embeddings/*
 
 .git/
 log/
+logs/
 model/*
 scripts/ngrok*
 scripts/colab-ssh-jupyter.sh

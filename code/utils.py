@@ -49,13 +49,19 @@ def preprocess_sentence(w, lang, aligned=True, add_special_tag=True):
         w = '<start> ' + w + ' <end>'
     return w
 
-def load_tokenizers():
+def load_tokenizers(user_config):
     """
-        load pre-trained tokenizer for input and target language
+        load pickled tokenizers for input and target language
     """
+    if user_config["inp_language"] == "en":
+        tokenizer_inp_path = "../tokenizers/tokenizer_en.pkl"
+        tokenizer_tar_path = "../tokenizers/tokenizer_fr.pkl"
+    else:
+        tokenizer_inp_path = "../tokenizers/tokenizer_fr.pkl"
+        tokenizer_tar_path = "../tokenizers/tokenizer_en.pkl"
 
-    tokenizer_inp = pickle.load(open("../tokenizers/input_tokenizer.pkl", "rb"))
-    tokenizer_tar = pickle.load(open("../tokenizers/target_tokenizer.pkl", "rb"))
+    tokenizer_tar = pickle.load(open(tokenizer_inp_path, "rb"))
+    tokenizer_inp = pickle.load(open(tokenizer_tar_path, "rb"))
 
     return tokenizer_inp, tokenizer_tar
 

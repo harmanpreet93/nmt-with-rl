@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import utils
 from data_loader import DataLoader
 from generate_model_predictions import sacrebleu_metric, compute_bleu
@@ -47,7 +48,7 @@ def get_sample_sent(sent, greedy=True):
         return sent_sample, sent_log_prob
 
 
-def rl_loss(real_seq, pred_seq, tokenizer_tar, pad_token_id):
+def rl_loss_fn(real_seq, pred_seq, tokenizer_tar, pad_token_id):
     sample_seq, log_probs = get_sample_sent(pred_seq, greedy=False)
     greedy_seq, _ = get_sample_sent(pred_seq, greedy=True)
 
@@ -73,8 +74,8 @@ def rl_loss(real_seq, pred_seq, tokenizer_tar, pad_token_id):
 
 
 # Since the target sequences are padded, it is important
-# to apply a padding mask when calculating the loss.
-def cross_entropy_loss(real, pred, loss_object, pad_token_id):
+# to apply a padding mask when calculating the losses
+def cross_entropy_loss_fn(real, pred, loss_object, pad_token_id):
     """Calculates total loss containing cross entropy with padding ignored.
       Args:
         real: Tensor of size [batch_size, length_logits, vocab_size]
@@ -92,10 +93,10 @@ def cross_entropy_loss(real, pred, loss_object, pad_token_id):
 
 
 def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id, use_rl=True):
-    mle_loss = cross_entropy_loss(real, pred, loss_object, pad_token_id)
+    mle_loss = cross_entropy_loss_fn(real, pred, loss_object, pad_token_id)
 
     if use_rl:
-        rl_loss_, batch_reward = rl_loss(real, pred, tokenizer_tar, pad_token_id)
+        rl_loss_, batch_reward = rl_loss_fn(real, pred, tokenizer_tar, pad_token_id)
         combined_loss = lambda_DL * mle_loss + lambda_RL * rl_loss_
     else:
         combined_loss = mle_loss
@@ -157,7 +158,7 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
     target_language = user_config["target_language"]
     checkpoint_path = user_config["transformer_checkpoint_path"]
     val_aligned_path_tar = user_config["val_data_path_{}".format(target_language)]
-    pred_file_path = "../log/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
+    pred_file_path = "../logs/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
         -1] + "_epoch-" + str(epoch) + "_prediction_{}.txt".format(target_language)
 
     sacrebleu_metric(transformer_model, pred_file_path, None,
@@ -168,11 +169,13 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
     print("-----------------------------")
 
     # append checkpoint and score to file name for easy reference
-    new_path = "../log/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
+    new_path = "../logs/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
         -1] + "_epoch-" + str(epoch) + "_prediction_{}".format(target_language) + "{:.4f}.txt".format(scores)
     # append score and checkpoint name to file_name
     os.rename(pred_file_path, new_path)
     print("Saved translated prediction at {}".format(new_path))
+
+    return scores
 
 
 def do_training(user_config):
@@ -184,7 +187,7 @@ def do_training(user_config):
 
     print("****Loading tokenizers****")
     # load pre-trained tokenizer
-    tokenizer_inp, tokenizer_tar = utils.load_tokenizers()
+    tokenizer_inp, tokenizer_tar = utils.load_tokenizers(user_config)
 
     print("****Loading train dataset****")
     # train data loader
@@ -228,7 +231,15 @@ def do_training(user_config):
     val_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='val_accuracy')
 
     user_rl = user_config['user_RL']
-    pad_token_id = 0
+    PAD_TOKEN_ID = 0
+
+    if user_config["tensorboard_logging"]:
+        model_name = user_config["transformer_checkpoint_path"].split("/")[-1]
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = '../logs/gradient_tape/' + model_name + "/" + current_time + '/train'
+        test_log_dir = '../logs/gradient_tape/' + model_name + "/" + current_time + '/val'
+        train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+        test_summary_writer = tf.summary.create_file_writer(test_log_dir)
 
     print("****Loading transformer model****")
     # load model and optimizer
@@ -236,6 +247,7 @@ def do_training(user_config):
         utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
 
     epochs = user_config["transformer_epochs"]
+    total_steps = 1048 // 128 + 1
     print("\nTraining model now...")
     for epoch in range(epochs):
         print()
@@ -256,7 +268,7 @@ def do_training(user_config):
             combined_loss, loss_, rl_loss, batch_reward = train_step(transformer_model, loss_object,
                                                                      optimizer, inp, tar,
                                                                      train_accuracy, tokenizer_tar,
-                                                                     pad_token_id=pad_token_id, use_rl=user_rl)
+                                                                     pad_token_id=PAD_TOKEN_ID, use_rl=user_rl)
 
             train_loss(combined_loss)
             train_mle_loss(loss_)
@@ -270,6 +282,13 @@ def do_training(user_config):
                     print("Train: MLE Loss: {}, RL Loss: {} Reward: {}".format(train_mle_loss.result(),
                                                                                train_rl_loss.result(),
                                                                                train_reward.result()))
+                if user_config["tensorboard_logging"]:
+                    with train_summary_writer.as_default():
+                        tf.summary.scalar('Combined Loss', train_loss.result(), step=total_steps * epoch + batch)
+                        tf.summary.scalar('MLE Loss', train_mle_loss.result(), step=total_steps * epoch + batch)
+                        tf.summary.scalar('RL Loss', train_rl_loss.result(), step=total_steps * epoch + batch)
+                        tf.summary.scalar('Average Reward', train_reward.result(), step=total_steps * epoch + batch)
+                        tf.summary.scalar('Accuracy', train_accuracy.result(), step=total_steps * epoch + batch)
 
         print("After {} epochs".format(epoch + 1))
         print('Train Loss: {:.4f}, Train Accuracy: {:.4f}'.format(train_loss.result(), train_accuracy.result()))
@@ -279,7 +298,7 @@ def do_training(user_config):
             combined_loss, loss_, rl_loss, batch_reward = val_step(transformer_model, loss_object,
                                                                    inp, tar,
                                                                    val_accuracy, tokenizer_tar,
-                                                                   pad_token_id=pad_token_id, use_rl=user_rl)
+                                                                   pad_token_id=PAD_TOKEN_ID, use_rl=user_rl)
             val_loss(combined_loss)
             val_mle_loss(loss_)
             val_rl_loss(rl_loss)
@@ -291,6 +310,14 @@ def do_training(user_config):
                                                                      val_rl_loss.result(),
                                                                      val_reward.result()))
 
+        if user_config["tensorboard_logging"]:
+            with test_summary_writer.as_default():
+                tf.summary.scalar('Combined Loss', val_loss.result(), step=(epoch + 1))
+                tf.summary.scalar('MLE Loss', val_mle_loss.result(), step=(epoch + 1))
+                tf.summary.scalar('RL Loss', val_rl_loss.result(), step=(epoch + 1))
+                tf.summary.scalar('Average Reward', val_reward.result(), step=(epoch + 1))
+                tf.summary.scalar('Accuracy', val_accuracy.result(), step=(epoch + 1))
+
         print('Time taken for training epoch {}: {} secs'.format(epoch + 1, time() - start))
 
         # evaluate and save model every x-epochs
@@ -298,7 +325,9 @@ def do_training(user_config):
             ckpt_save_path = ckpt_manager.save()
             print('Saved checkpoint after epoch {} at {}'.format(epoch + 1, ckpt_save_path))
             print("\nComputing BLEU at epoch {}: ".format(epoch + 1))
-            compute_bleu_score(transformer_model, val_dataset, user_config, tokenizer_tar, epoch + 1)
+            scores = compute_bleu_score(transformer_model, val_dataset, user_config, tokenizer_tar, epoch + 1)
+            with test_summary_writer.as_default():
+                tf.summary.scalar('Bleu Score', scores, step=(epoch + 1))
 
 
 def main():
