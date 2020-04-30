@@ -31,9 +31,9 @@ def get_bleu_score(sys, refs):
     :param refs: sentence 2
     :return: bleu score
     """
-    bleu = sacrebleu.corpus_bleu(sys, [refs])
-    # TODO: bleu score 0 if length less than 3
-    return bleu.score
+    # Note: bleu score 0 if length less than 3
+    bleu_scores = [sacrebleu.corpus_bleu([sys[i]], [[refs[i]]]).score for i in range(len(sys))]
+    return np.array(bleu_scores)
 
 
 def get_sample_sent(sent, greedy=True):
@@ -47,32 +47,39 @@ def get_sample_sent(sent, greedy=True):
         return sent_sample, sent_log_prob
 
 
-def get_rl_loss(real, pred, tokenizer_tar):
-    sample_sents, log_probs = get_sample_sent(pred, greedy=False)
-    greedy_sents, _ = get_sample_sent(pred, greedy=True)
+def rl_loss(real_seq, pred_seq, tokenizer_tar, pad_token_id):
+    sample_seq, log_probs = get_sample_sent(pred_seq, greedy=False)
+    greedy_seq, _ = get_sample_sent(pred_seq, greedy=True)
 
-    sampled_out = tokenizer_tar.sequences_to_texts(sample_sents.numpy())
-    greedy_out = tokenizer_tar.sequences_to_texts(greedy_sents.numpy())
-    real_out = tokenizer_tar.sequences_to_texts(real.numpy())
+    sampled_sents = tokenizer_tar.sequences_to_texts(sample_seq.numpy())
+    greedy_sents = tokenizer_tar.sequences_to_texts(greedy_seq.numpy())
+    real_sents = tokenizer_tar.sequences_to_texts(real_seq.numpy())
 
-    sample_reward = get_bleu_score(sampled_out, real_out)
-    baseline_reward = get_bleu_score(greedy_out, real_out)
+    sampled_sents = [x.split("<end>")[0] for x in sampled_sents]
+    greedy_sents = [x.split("<end>")[0] for x in greedy_sents]
+    real_sents = [x.split("<end>")[0] for x in real_sents]
 
-    rl_loss = -(sample_reward - baseline_reward) * log_probs
-    batch_reward = np.array(sample_reward).mean()
+    sample_reward = get_bleu_score(sampled_sents, real_sents)
+    baseline_reward = get_bleu_score(greedy_sents, real_sents)
 
-    return rl_loss, batch_reward
+    mask = tf.math.logical_not(tf.math.equal(real_seq, pad_token_id))
+    mask = tf.cast(mask, dtype=log_probs.dtype)
+    log_probs *= mask
+    log_probs = tf.reduce_sum(log_probs, axis=1) / tf.reduce_sum(mask, axis=1)  # avg on seq level
+    rl_loss = -(sample_reward - baseline_reward) * log_probs  # batch_size * 1
+    rl_loss = tf.reduce_mean(rl_loss)  # avg on batch level
+
+    return rl_loss, np.mean(sample_reward)
 
 
 # Since the target sequences are padded, it is important
 # to apply a padding mask when calculating the loss.
-def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id, use_rl=True):
+def cross_entropy_loss(real, pred, loss_object, pad_token_id):
     """Calculates total loss containing cross entropy with padding ignored.
       Args:
         real: Tensor of size [batch_size, length_logits, vocab_size]
         pred: Tensor of size [batch_size, length_labels]
         loss_object: Cross entropy loss
-        tokenizer_tar: tokenizer
         pad_token_id: Pad token id to ignore
       Returns:
         A scalar float tensor for loss.
@@ -81,18 +88,25 @@ def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id, use_rl=T
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
+    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+
+
+def loss_function(real, pred, loss_object, tokenizer_tar, pad_token_id, use_rl=True):
+    mle_loss = cross_entropy_loss(real, pred, loss_object, pad_token_id)
+
     if use_rl:
-        rl_loss, batch_reward = get_rl_loss(real, pred, tokenizer_tar)
-        rl_loss *= mask
-        combined_loss = lambda_DL * loss_ + lambda_RL * rl_loss
+        rl_loss_, batch_reward = rl_loss(real, pred, tokenizer_tar, pad_token_id)
+        combined_loss = lambda_DL * mle_loss + lambda_RL * rl_loss_
     else:
-        combined_loss = loss_
+        combined_loss = mle_loss
+        rl_loss_ = 0
         batch_reward = 0
-    return tf.reduce_sum(combined_loss) / tf.reduce_sum(mask), batch_reward
+
+    return combined_loss, mle_loss, rl_loss_, batch_reward
 
 
-def train_step(model, loss_object, optimizer, inp, tar,
-               train_loss, train_accuracy, tokenizer_tar, pad_token_id, use_rl=True):
+def train_step(model, loss_object, optimizer, inp, tar, train_accuracy,
+               tokenizer_tar, pad_token_id, use_rl=True):
     tar_inp = tar[:, :-1]
     tar_real = tar[:, 1:]
 
@@ -107,18 +121,19 @@ def train_step(model, loss_object, optimizer, inp, tar,
                                combined_mask,
                                dec_padding_mask)
 
-        loss, batch_reward = loss_function(tar_real, predictions, loss_object, tokenizer_tar, pad_token_id, use_rl)
+        combined_loss, loss_, rl_loss, batch_reward = loss_function(tar_real, predictions,
+                                                                    loss_object, tokenizer_tar,
+                                                                    pad_token_id, use_rl)
 
-    gradients = tape.gradient(loss, model.trainable_variables)
+    gradients = tape.gradient(combined_loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
-    train_loss(loss)
     train_accuracy(tar_real, predictions)
-    return batch_reward
+    return combined_loss, loss_, rl_loss, batch_reward
 
 
 def val_step(model, loss_object, inp, tar,
-             val_loss, val_accuracy, tokenizer_tar, pad_token_id, use_rl=True):
+             val_accuracy, tokenizer_tar, pad_token_id, use_rl=True):
     tar_inp = tar[:, :-1]
     tar_real = tar[:, 1:]
 
@@ -129,11 +144,12 @@ def val_step(model, loss_object, inp, tar,
                            enc_padding_mask,
                            combined_mask,
                            dec_padding_mask)
-    loss, batch_reward = loss_function(tar_real, predictions, loss_object, tokenizer_tar, pad_token_id, use_rl)
+    combined_loss, loss_, rl_loss, batch_reward = loss_function(tar_real, predictions,
+                                                                loss_object, tokenizer_tar,
+                                                                pad_token_id, use_rl)
 
-    val_loss(loss)
     val_accuracy(tar_real, predictions)
-    return batch_reward
+    return combined_loss, loss_, rl_loss, batch_reward
 
 
 def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, epoch):
@@ -148,12 +164,12 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
                      tokenizer_tar, dataset,
                      max_length=120)
     print("-----------------------------")
-    compute_bleu(pred_file_path, val_aligned_path_tar, print_all_scores=False)
+    scores = compute_bleu(pred_file_path, val_aligned_path_tar, print_all_scores=False)
     print("-----------------------------")
 
     # append checkpoint and score to file name for easy reference
     new_path = "../log/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
-        -1] + "_epoch-" + str(epoch) + "_prediction_{}".format(target_language) + ".txt"
+        -1] + "_epoch-" + str(epoch) + "_prediction_{}".format(target_language) + "{:.4f}.txt".format(scores)
     # append score and checkpoint name to file_name
     os.rename(pred_file_path, new_path)
     print("Saved translated prediction at {}".format(new_path))
@@ -201,12 +217,16 @@ def do_training(user_config):
     # define loss and accuracy metrics
     loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
     train_loss = tf.keras.metrics.Mean(name='train_loss')
+    train_rl_loss = tf.keras.metrics.Mean(name='train_rl_loss')
+    train_mle_loss = tf.keras.metrics.Mean(name='train_mle_loss')
+    train_reward = tf.keras.metrics.Mean(name='train_reward')
     train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
     val_loss = tf.keras.metrics.Mean(name='val_loss')
+    val_rl_loss = tf.keras.metrics.Mean(name='val_rl_loss')
+    val_mle_loss = tf.keras.metrics.Mean(name='val_mle_loss')
+    val_reward = tf.keras.metrics.Mean(name='val_reward')
     val_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='val_accuracy')
 
-    train_batch_reward = []
-    val_batch_reward = []
     user_rl = user_config['user_RL']
     pad_token_id = 0
 
@@ -221,33 +241,55 @@ def do_training(user_config):
         print()
         start = time()
         train_loss.reset_states()
+        train_rl_loss.reset_states()
+        train_mle_loss.reset_states()
+        train_reward.reset_states()
         train_accuracy.reset_states()
         val_loss.reset_states()
+        val_rl_loss.reset_states()
+        val_mle_loss.reset_states()
+        val_reward.reset_states()
         val_accuracy.reset_states()
 
         # inp -> english, tar -> french
         for (batch, (inp, tar)) in enumerate(train_dataset):
-            train_batch_reward.append(train_step(transformer_model, loss_object, optimizer, inp, tar,
-                                                 train_loss, train_accuracy, tokenizer_tar,
-                                                 pad_token_id=pad_token_id, use_rl=user_rl))
+            combined_loss, loss_, rl_loss, batch_reward = train_step(transformer_model, loss_object,
+                                                                     optimizer, inp, tar,
+                                                                     train_accuracy, tokenizer_tar,
+                                                                     pad_token_id=pad_token_id, use_rl=user_rl)
 
-            if batch % 50 == 0:
+            train_loss(combined_loss)
+            train_mle_loss(loss_)
+            train_rl_loss(rl_loss)
+            train_reward(batch_reward)
+
+            if batch % 10 == 0:
                 print('Train: Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
                     epoch + 1, batch, train_loss.result(), train_accuracy.result()))
                 if user_rl:
-                    print("Train reward {}".format(np.mean(train_batch_reward)))
+                    print("Train: MLE Loss: {}, RL Loss: {} Reward: {}".format(train_mle_loss.result(),
+                                                                               train_rl_loss.result(),
+                                                                               train_reward.result()))
 
         print("After {} epochs".format(epoch + 1))
         print('Train Loss: {:.4f}, Train Accuracy: {:.4f}'.format(train_loss.result(), train_accuracy.result()))
 
         # inp -> english, tar -> french
         for (batch, (inp, tar)) in enumerate(val_dataset):
-            val_batch_reward.append(val_step(transformer_model, loss_object, inp, tar,
-                                             val_loss, val_accuracy, tokenizer_tar,
-                                             pad_token_id=pad_token_id, use_rl=user_rl))
+            combined_loss, loss_, rl_loss, batch_reward = val_step(transformer_model, loss_object,
+                                                                   inp, tar,
+                                                                   val_accuracy, tokenizer_tar,
+                                                                   pad_token_id=pad_token_id, use_rl=user_rl)
+            val_loss(combined_loss)
+            val_mle_loss(loss_)
+            val_rl_loss(rl_loss)
+            val_reward(batch_reward)
+
         print('Val Loss: {:.4f}, Val Accuracy: {:.4f}'.format(val_loss.result(), val_accuracy.result()))
         if user_rl:
-            print("Val reward {}".format(np.mean(val_batch_reward)))
+            print("Val: MLE Loss: {}, RL Loss: {} Reward: {}".format(val_mle_loss.result(),
+                                                                     val_rl_loss.result(),
+                                                                     val_reward.result()))
 
         print('Time taken for training epoch {}: {} secs'.format(epoch + 1, time() - start))
 

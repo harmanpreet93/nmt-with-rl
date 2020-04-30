@@ -63,6 +63,7 @@ def compute_bleu(pred_file_path: str, target_file_path: str, print_all_scores: b
     else:
         scores = [float(x) for x in lines[:-1]]
         print('final avg bleu score: {:.2f}'.format(sum(scores) / len(scores)))
+        return sum(scores) / len(scores)
 
 
 def main():
