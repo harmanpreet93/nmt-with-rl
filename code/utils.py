@@ -1,31 +1,25 @@
 import os
-import io
 import json
 import unicodedata
-
-from transformer import Transformer, CustomSchedule
 import numpy as np
 import tensorflow as tf
-import pickle
 import re
 import subprocess
 import tensorflow_datasets as tfds
+from transformer import Transformer, CustomSchedule
 
 
 def set_seed(seed):
     tf.random.set_seed(seed)
     np.random.seed(seed)
 
+
 def compute_bleu(pred_file_path: str, target_file_path: str, print_all_scores: bool):
     """
-
-    Args:
-        pred_file_path: the file path that contains the predictions.
-        target_file_path: the file path that contains the targets (also called references).
-        print_all_scores: if True, will print one score per example.
-
-    Returns: None
-
+    :param pred_file_path: the file path that contains the predictions
+    :param target_file_path: the file path that contains the targets (also called references)
+    :param print_all_scores: if True, will print one score per example
+    :return: None
     """
     out = subprocess.run(["sacrebleu", "--input", pred_file_path, target_file_path, '--tokenize',
                           'none', '--sentence-level', '--score-only'],
@@ -41,8 +35,8 @@ def compute_bleu(pred_file_path: str, target_file_path: str, print_all_scores: b
 
 def load_file(path):
     """
-    load json file
-    param path: json file path to load
+    :param path: json file path to load
+    :return: json dictionary
     """
     assert os.path.isfile(path), f"invalid config file: {path}"
     with open(path, "r") as fd:
@@ -58,7 +52,7 @@ def preprocess_sentence(w):
     w = unicode_to_ascii(w.lower().strip())
     # creating a space between a word and the punctuation following it
     # eg: "he is a boy." => "he is a boy ."
-    # Reference:- https://stackoverflow.com/questions/3645931/python-padding-punctuation-with-white-spaces-keeping-punctuation
+    # Reference: https://stackoverflow.com/questions/3645931/python-padding-punctuation-with-white-spaces-keeping-punctuation
     w = re.sub(r"([?.!,¿])", r" \1 ", w)
     w = re.sub(r'[" "]+', " ", w)
     # replacing everything with space except (a-z, A-Z, ".", "?", "!", ",")
@@ -132,50 +126,7 @@ def get_dataset_and_tokenizer(user_config):
     return train_dataset, val_dataset, tokenizer_en, tokenizer_pt
 
 
-def tokenize(aligned_lang, unaligned_lang, num_words):
-    lang_tokenizer = tf.keras.preprocessing.text.Tokenizer(filters=' ', lower=False, num_words=num_words)
-    lang_tokenizer.fit_on_texts(aligned_lang + unaligned_lang)
-    tensor = lang_tokenizer.texts_to_sequences(aligned_lang)
-    tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
-    return tensor, lang_tokenizer
-
-
-def preprocess_sentence_(w, lang, aligned=True, add_special_tag=True):
-    w = w.strip()
-    if lang == "en" and not aligned:
-        # This part is required only for english unaligned samples in word2vec
-        # w = unicode_to_ascii(w.lower())
-        # Removing everything except(letters)
-        w = re.sub(r"[^a-z]+", " ", w)
-    if lang == "fr" and not aligned:
-        # Adding space with punctuation for easy split.
-        w = re.sub(r"([?.!,¿])", r" \1 ", w)
-        w = re.sub(r'[" "]+', " ", w)
-    w = w.strip()
-    # currently keeping these tags for both type of data
-    if add_special_tag:
-        w = '<start> ' + w + ' <end>'
-    return w
-
-
-def load_tokenizers(user_config):
-    """
-        load pickled tokenizers for input and target language
-    """
-    if user_config["inp_language"] == "en":
-        tokenizer_inp_path = "../tokenizers/tokenizer_en.pkl"
-        tokenizer_tar_path = "../tokenizers/tokenizer_fr.pkl"
-    else:
-        tokenizer_inp_path = "../tokenizers/tokenizer_fr.pkl"
-        tokenizer_tar_path = "../tokenizers/tokenizer_en.pkl"
-
-    tokenizer_tar = pickle.load(open(tokenizer_inp_path, "rb"))
-    tokenizer_inp = pickle.load(open(tokenizer_tar_path, "rb"))
-
-    return tokenizer_inp, tokenizer_tar
-
-
-def load_transformer_model(user_config, tokenizer_inp, tokenizer_tar):
+def load_transformer_model(user_config):
     """
     load transformer model and latest checkpoint to continue training
     """

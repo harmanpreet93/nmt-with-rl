@@ -214,15 +214,13 @@ def do_training(user_config):
 
     print("****Loading transformer model****")
     # load model and optimizer
-    transformer_model, optimizer, ckpt_manager = \
-        utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
+    transformer_model, optimizer, ckpt_manager = utils.load_transformer_model(user_config)
 
-    # scores = compute_bleu_score(transformer_model, val_dataset, user_config, tokenizer_tar, 1 + 1)
-
+    start_epoch = 21
     epochs = user_config["transformer_epochs"]
     total_steps = 50000 // user_config["transformer_batch_size"] + 1
     print("\nTraining model now...")
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         print()
         start = time()
         train_loss.reset_states()

@@ -44,7 +44,6 @@ def evaluate_batch(model, inputs, tokenizer_tar, max_length):
                                                combined_mask,
                                                dec_padding_mask)
 
-
         # select the last word from the seq_len dimension
         predictions = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
 
@@ -64,39 +63,25 @@ def evaluate_batch(model, inputs, tokenizer_tar, max_length):
     return output, attention_weights
 
 
-def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path):
+def do_evaluation(user_config, pred_file_path):
     inp_language = user_config["inp_language"]
     target_language = user_config["target_language"]
 
     print("\n****Evaluating model from {} to {}****\n".format(inp_language, target_language))
 
-    print("****Loading Sub-Word Tokenizers****")
-    # load pre-trained tokenizer
-    tokenizer_inp, tokenizer_tar = utils.load_tokenizers()
-
-    print("****Initializing DataLoader****")
-    # data loader
-    test_dataloader = DataLoader(user_config["transformer_batch_size"],
-                                 input_file_path,
-                                 target_file_path,
-                                 tokenizer_inp,
-                                 tokenizer_tar,
-                                 inp_language,
-                                 target_language,
-                                 False)
-    test_dataset = test_dataloader.get_data_loader()
+    print("****Loading DataLoader and Tokenizers****")
+    train_dataset, test_dataset, tokenizer_tar, tokenizer_inp = utils.get_dataset_and_tokenizer(user_config)
 
     print("****Loading transformer model****")
     # load model and optimizer
-    transformer_model, optimizer, ckpt_manager = \
-        utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
+    transformer_model, optimizer, ckpt_manager = utils.load_transformer_model(user_config)
 
     print("****Generating Translations****")
     sacrebleu_metric(transformer_model,
                      pred_file_path,
                      tokenizer_tar,
                      test_dataset,
-                     tokenizer_tar.MAX_LENGTH
+                     max_length=150
                      )
 
 
@@ -121,10 +106,7 @@ def main():
     utils.set_seed(seed)
 
     # generate translations
-    do_evaluation(user_config,
-                  args.input_file_path,
-                  None,
-                  args.pred_file_path)
+    do_evaluation(user_config, args.pred_file_path)
 
     if args.target_file_path is not None:
         print("\nComputing bleu score now...")
