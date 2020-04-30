@@ -160,7 +160,7 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
     pred_file_path = "../logs/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
         -1] + "_epoch-" + str(epoch) + "_prediction_{}.txt".format(target_language)
 
-    sacrebleu_metric(transformer_model, pred_file_path, None,
+    sacrebleu_metric(transformer_model, pred_file_path,
                      tokenizer_tar, dataset,
                      max_length=120)
 

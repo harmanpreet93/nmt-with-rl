@@ -5,7 +5,7 @@
   "tensorboard_logging": true,
   "transformer_dropout_rate": 0.1,
   "transformer_batch_size": 128,
-  "transformer_epochs": 20,
+  "transformer_epochs": 25,
   "transformer_num_layers": 4,
   "transformer_model_dimensions": 128,
   "transformer_num_heads": 8,

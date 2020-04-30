@@ -9,25 +9,14 @@ import json
 """Evaluate"""
 
 
-def sacrebleu_metric(model, pred_file_path, target_file_path, tokenizer_tar, test_dataset, max_length):
-    if target_file_path is None:
-        with open(pred_file_path, "w", buffering=1) as f_pred:
-            # evaluations possibly faster in batches
-            for batch, (inp_seq, _) in enumerate(test_dataset):
-                if (batch + 1) % 2 == 0:
-                    print("Evaluating batch {}".format(batch))
-                translated_batch = translate_batch(model, inp_seq, tokenizer_tar, max_length)
-                for pred in translated_batch:
-                    f_pred.write(pred.strip() + "\n")
-    else:
-        # write both prediction and target file together
-        with open(pred_file_path, "w", buffering=1) as f_pred, open(target_file_path, "w", buffering=1) as f_true:
-            for batch, (inp_seq, _, tar) in enumerate(test_dataset):
-                # evaluations possibly faster in batches
-                translated_batch = translate_batch(model, inp_seq, tokenizer_tar, max_length)
-                for true, pred in zip(tar, translated_batch):
-                    f_true.write(tf.compat.as_str_any(true.numpy()).strip() + "\n")
-                    f_pred.write(pred.strip() + "\n")
+def sacrebleu_metric(model, pred_file_path, tokenizer_tar, test_dataset, max_length):
+    with open(pred_file_path, "w", buffering=1) as f_pred:
+        # evaluation faster in batches
+        for batch, (inp_seq, _) in enumerate(test_dataset):
+            print("Evaluating batch {}".format(batch))
+            translated_batch = translate_batch(model, inp_seq, tokenizer_tar, max_length)
+            for pred in translated_batch:
+                f_pred.write(pred.strip() + "\n")
 
 
 def translate_batch(model, inp, tokenizer_tar, max_length):
@@ -102,7 +91,6 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
     print("****Generating Translations****")
     sacrebleu_metric(transformer_model,
                      pred_file_path,
-                     target_file_path,
                      tokenizer_tar,
                      test_dataset,
                      tokenizer_tar.MAX_LENGTH

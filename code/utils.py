@@ -70,7 +70,7 @@ def preprocess_sentence(w):
     return w
 
 
-def get_tokenizers(examples, user_config, VOCAB_SIZE, shuffle):
+def get_tokenizers(examples, user_config, VOCAB_SIZE, shuffle=True):
     BUFFER_SIZE = 20000
     BATCH_SIZE = user_config["transformer_batch_size"]
 
@@ -83,18 +83,17 @@ def get_tokenizers(examples, user_config, VOCAB_SIZE, shuffle):
     for pt, en in train_examples:
         en_ = preprocess_sentence(en.numpy().decode("utf-8"))
         pt_ = preprocess_sentence(pt.numpy().decode("utf-8"))
-        tokenizer_en.fit_on_texts(en_)
-        tokenizer_pt.fit_on_texts(pt_)
         en_data_train.append(en_)
         pt_data_train.append(pt_)
 
     for pt, en in val_examples:
         en_ = preprocess_sentence(en.numpy().decode("utf-8"))
         pt_ = preprocess_sentence(pt.numpy().decode("utf-8"))
-        tokenizer_en.fit_on_texts(en_)
-        tokenizer_pt.fit_on_texts(pt_)
         en_data_val.append(en_)
         pt_data_val.append(pt_)
+
+    tokenizer_en.fit_on_texts(en_data_train + en_data_val)
+    tokenizer_pt.fit_on_texts(pt_data_train + pt_data_val)
 
     tensor_en_train = encode_and_pad(en_data_train, tokenizer_en)
     tensor_pt_train = encode_and_pad(pt_data_train, tokenizer_pt)
