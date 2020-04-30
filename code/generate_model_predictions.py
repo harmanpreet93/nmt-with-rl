@@ -1,7 +1,6 @@
 import argparse
 from data_loader import DataLoader
-from evaluator import compute_bleu
-from transformer import Transformer, create_masks
+from transformer import create_masks
 import utils
 import tensorflow as tf
 import os
@@ -73,22 +72,6 @@ def evaluate_batch(model, inputs, tokenizer_tar, max_length):
     return output, attention_weights
 
 
-# def sequences_to_texts_(tokenizer, pred):
-#     # split because batch might flush output tokens even after eos token due to race conditions
-#     pad_indices = tf.where(pred == tokenizer.eos_token_id)
-#     if pad_indices.shape[0] > 0:
-#         index = pad_indices.numpy()[0][0]
-#         pred = pred[:index]
-#     decoded_text = tokenizer.decode(pred)
-#     return decoded_text
-#
-#
-# def sequences_to_texts_batch(tokenizer, pred_batch):
-#     pred_sentences = tokenizer.sequences_to_texts(pred_batch.numpy())
-#     # pred_sentences = [x.split("<end>")[0].replace("<start>", "").strip() for x in pred_sentences]
-#     return pred_sentences
-
-
 def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path):
     inp_language = user_config["inp_language"]
     target_language = user_config["target_language"]
@@ -110,56 +93,6 @@ def do_evaluation(user_config, input_file_path, target_file_path, pred_file_path
                                  target_language,
                                  False)
     test_dataset = test_dataloader.get_data_loader()
-
-    '''
-    # dummy data loader. required for loading checkpoint
-    dummy_dataloader = DataLoader(user_config["transformer_batch_size"],
-                                  user_config["dummy_data_path_{}".format(inp_language)],
-                                  None,
-                                  tokenizer_inp,
-                                  tokenizer_tar,
-                                  inp_language,
-                                  target_language,
-                                  False)
-    dummy_dataset = dummy_dataloader.get_data_loader()
-    
-    input_vocab_size = tokenizer_inp.vocab_size
-    target_vocab_size = tokenizer_tar.vocab_size
-
-    use_pretrained_emb = user_config["use_pretrained_emb"]
-    if use_pretrained_emb:
-        pretrained_weights_inp = np.load(user_config["pretrained_emb_path_{}".format(inp_language)])
-        pretrained_weights_tar = np.load(user_config["pretrained_emb_path_{}".format(target_language)])
-    else:
-        pretrained_weights_inp = None
-        pretrained_weights_tar = None
-
-    transformer_model = Transformer(
-        user_config["transformer_num_layers"],
-        user_config["transformer_model_dimensions"],
-        user_config["transformer_num_heads"],
-        user_config["transformer_dff"],
-        input_vocab_size,
-        target_vocab_size,
-        en_input=input_vocab_size,
-        fr_target=target_vocab_size,
-        rate=user_config["transformer_dropout_rate"],
-        weights_inp=pretrained_weights_inp,
-        weights_tar=pretrained_weights_tar)
-
-    sacrebleu_metric(transformer_model,
-                     pred_file_path,
-                     None,
-                     tokenizer_tar,
-                     dummy_dataset,
-                     tokenizer_tar.MAX_LENGTH
-                     )
-    
-    print("****Loading Model****")
-    # load model
-    model_path = user_config["model_file"]
-    transformer_model.load_weights(model_path)
-    '''
 
     print("****Loading transformer model****")
     # load model and optimizer
@@ -205,7 +138,7 @@ def main():
     if args.target_file_path is not None:
         print("\nComputing bleu score now...")
         # compute bleu score
-        compute_bleu(args.pred_file_path, args.target_file_path, print_all_scores=False)
+        utils.compute_bleu(args.pred_file_path, args.target_file_path, print_all_scores=False)
     else:
         print("\nNot predicting bleu as --target_file_path was not provided")
 

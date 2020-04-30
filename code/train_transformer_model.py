@@ -1,8 +1,7 @@
 import argparse
 import datetime
 import utils
-from data_loader import DataLoader
-from generate_model_predictions import sacrebleu_metric, compute_bleu
+from generate_model_predictions import sacrebleu_metric
 import tensorflow as tf
 import os
 import json
@@ -164,8 +163,9 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
     sacrebleu_metric(transformer_model, pred_file_path, None,
                      tokenizer_tar, dataset,
                      max_length=120)
+
     print("-----------------------------")
-    scores = compute_bleu(pred_file_path, val_aligned_path_tar, print_all_scores=False)
+    scores = utils.compute_bleu(pred_file_path, val_aligned_path_tar, print_all_scores=False)
     print("-----------------------------")
 
     # append checkpoint and score to file name for easy reference
@@ -184,38 +184,10 @@ def do_training(user_config):
 
     print("\n****Training model from {} to {}****\n".format(inp_language, target_language))
     print("****Using RL: {}****".format(user_config["user_RL"]))
+    print("****Tensroboard Logging: {}****".format(user_config["tensorboard_logging"]))
 
-    print("****Loading tokenizers****")
-    # load pre-trained tokenizer
-    tokenizer_inp, tokenizer_tar = utils.load_tokenizers(user_config)
-
-    print("****Loading train dataset****")
-    # train data loader
-    train_aligned_path_inp = user_config["train_data_path_{}".format(inp_language)]
-    train_aligned_path_tar = user_config["train_data_path_{}".format(target_language)]
-    train_dataloader = DataLoader(user_config["transformer_batch_size"],
-                                  train_aligned_path_inp,
-                                  train_aligned_path_tar,
-                                  tokenizer_inp,
-                                  tokenizer_tar,
-                                  inp_language,
-                                  target_language,
-                                  True)
-    train_dataset = train_dataloader.get_data_loader()
-
-    print("****Loading val dataset****")
-    # val data loader
-    val_aligned_path_inp = user_config["val_data_path_{}".format(inp_language)]
-    val_aligned_path_tar = user_config["val_data_path_{}".format(target_language)]
-    val_dataloader = DataLoader(user_config["transformer_batch_size"] * 2,  # for fast validation increase batch size
-                                val_aligned_path_inp,
-                                val_aligned_path_tar,
-                                tokenizer_inp,
-                                tokenizer_tar,
-                                inp_language,
-                                target_language,
-                                False)
-    val_dataset = val_dataloader.get_data_loader()
+    print("****Loading tokenizers and datasets****")
+    train_dataset, val_dataset, tokenizer_tar, tokenizer_inp = utils.get_dataset_and_tokenizer(user_config)
 
     # define loss and accuracy metrics
     loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
@@ -247,7 +219,7 @@ def do_training(user_config):
         utils.load_transformer_model(user_config, tokenizer_inp, tokenizer_tar)
 
     epochs = user_config["transformer_epochs"]
-    total_steps = 1048 // 128 + 1
+    total_steps = 50000 // user_config["transformer_batch_size"] + 1
     print("\nTraining model now...")
     for epoch in range(epochs):
         print()
@@ -275,13 +247,15 @@ def do_training(user_config):
             train_rl_loss(rl_loss)
             train_reward(batch_reward)
 
-            if batch % 10 == 0:
+            if batch % 50 == 0:
                 print('Train: Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
                     epoch + 1, batch, train_loss.result(), train_accuracy.result()))
                 if user_rl:
                     print("Train: MLE Loss: {}, RL Loss: {} Reward: {}".format(train_mle_loss.result(),
                                                                                train_rl_loss.result(),
                                                                                train_reward.result()))
+
+            if batch % 10 == 0:
                 if user_config["tensorboard_logging"]:
                     with train_summary_writer.as_default():
                         tf.summary.scalar('Combined Loss', train_loss.result(), step=total_steps * epoch + batch)
@@ -298,7 +272,8 @@ def do_training(user_config):
             combined_loss, loss_, rl_loss, batch_reward = val_step(transformer_model, loss_object,
                                                                    inp, tar,
                                                                    val_accuracy, tokenizer_tar,
-                                                                   pad_token_id=PAD_TOKEN_ID, use_rl=user_rl)
+                                                                   pad_token_id=PAD_TOKEN_ID,
+                                                                   use_rl=user_rl)
             val_loss(combined_loss)
             val_mle_loss(loss_)
             val_rl_loss(rl_loss)
@@ -321,7 +296,7 @@ def do_training(user_config):
         print('Time taken for training epoch {}: {} secs'.format(epoch + 1, time() - start))
 
         # evaluate and save model every x-epochs
-        if (epoch + 1) % 5 == 0 and user_config["compute_bleu"]:
+        if (epoch) % 5 == 0 and user_config["compute_bleu"]:
             ckpt_save_path = ckpt_manager.save()
             print('Saved checkpoint after epoch {} at {}'.format(epoch + 1, ckpt_save_path))
             print("\nComputing BLEU at epoch {}: ".format(epoch + 1))

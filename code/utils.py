@@ -1,17 +1,42 @@
 import os
 import io
 import json
-from pretrained_tokenizer import Tokenizer
+import unicodedata
+
 from transformer import Transformer, CustomSchedule
 import numpy as np
 import tensorflow as tf
 import pickle
 import re
+import subprocess
+import tensorflow_datasets as tfds
 
 
 def set_seed(seed):
     tf.random.set_seed(seed)
     np.random.seed(seed)
+
+def compute_bleu(pred_file_path: str, target_file_path: str, print_all_scores: bool):
+    """
+
+    Args:
+        pred_file_path: the file path that contains the predictions.
+        target_file_path: the file path that contains the targets (also called references).
+        print_all_scores: if True, will print one score per example.
+
+    Returns: None
+
+    """
+    out = subprocess.run(["sacrebleu", "--input", pred_file_path, target_file_path, '--tokenize',
+                          'none', '--sentence-level', '--score-only'],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    lines = out.stdout.split(b'\n')
+    if print_all_scores:
+        print('\n'.join(lines[:-1]))
+    else:
+        scores = [float(x) for x in lines[:-1]]
+        print('final avg bleu score: {:.2f}'.format(sum(scores) / len(scores)))
+        return sum(scores) / len(scores)
 
 
 def load_file(path):
@@ -24,6 +49,89 @@ def load_file(path):
         return json.load(fd)
 
 
+def unicode_to_ascii(s):
+    return ''.join(c for c in unicodedata.normalize('NFD', str(s))
+                   if unicodedata.category(c) != 'Mn')
+
+
+def preprocess_sentence(w):
+    w = unicode_to_ascii(w.lower().strip())
+    # creating a space between a word and the punctuation following it
+    # eg: "he is a boy." => "he is a boy ."
+    # Reference:- https://stackoverflow.com/questions/3645931/python-padding-punctuation-with-white-spaces-keeping-punctuation
+    w = re.sub(r"([?.!,¿])", r" \1 ", w)
+    w = re.sub(r'[" "]+', " ", w)
+    # replacing everything with space except (a-z, A-Z, ".", "?", "!", ",")
+    w = re.sub(r"[^a-zA-Z?.!,¿]+", " ", w)
+    w = w.strip()
+    # adding a start and an end token to the sentence
+    # so that the model know when to start and stop predicting.
+    w = '<start> ' + w + ' <end>'
+    return w
+
+
+def get_tokenizers(examples, user_config, VOCAB_SIZE, shuffle):
+    BUFFER_SIZE = 20000
+    BATCH_SIZE = user_config["transformer_batch_size"]
+
+    train_examples, val_examples = examples['train'], examples['validation']
+
+    tokenizer_en = tf.keras.preprocessing.text.Tokenizer(filters=' ', lower=False, num_words=VOCAB_SIZE)
+    tokenizer_pt = tf.keras.preprocessing.text.Tokenizer(filters=' ', lower=False, num_words=VOCAB_SIZE)
+
+    en_data_train, pt_data_train, en_data_val, pt_data_val = [], [], [], []
+    for pt, en in train_examples:
+        en_ = preprocess_sentence(en.numpy().decode("utf-8"))
+        pt_ = preprocess_sentence(pt.numpy().decode("utf-8"))
+        tokenizer_en.fit_on_texts(en_)
+        tokenizer_pt.fit_on_texts(pt_)
+        en_data_train.append(en_)
+        pt_data_train.append(pt_)
+
+    for pt, en in val_examples:
+        en_ = preprocess_sentence(en.numpy().decode("utf-8"))
+        pt_ = preprocess_sentence(pt.numpy().decode("utf-8"))
+        tokenizer_en.fit_on_texts(en_)
+        tokenizer_pt.fit_on_texts(pt_)
+        en_data_val.append(en_)
+        pt_data_val.append(pt_)
+
+    tensor_en_train = encode_and_pad(en_data_train, tokenizer_en)
+    tensor_pt_train = encode_and_pad(pt_data_train, tokenizer_pt)
+    tensor_en_val = encode_and_pad(en_data_val, tokenizer_en)
+    tensor_pt_val = encode_and_pad(pt_data_val, tokenizer_pt)
+
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        (tensor_pt_train, tensor_en_train)).shuffle(
+        BUFFER_SIZE).batch(
+        BATCH_SIZE).cache().prefetch(
+        tf.data.experimental.AUTOTUNE)
+
+    val_dataset = tf.data.Dataset.from_tensor_slices(
+        (tensor_pt_val, tensor_en_val)).batch(
+        BATCH_SIZE).cache().prefetch(
+        tf.data.experimental.AUTOTUNE)
+
+    return train_dataset, val_dataset, tokenizer_en, tokenizer_pt
+
+
+def encode_and_pad(data, tokenizer):
+    tensor = tokenizer.texts_to_sequences(data)
+    return tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post', maxlen=100)
+
+
+def get_dataset_and_tokenizer(user_config):
+    VOCAB_SIZE = 20000
+
+    examples, metadata = tfds.load('ted_hrlr_translate/pt_to_en',
+                                   with_info=True,
+                                   as_supervised=True)
+
+    train_dataset, val_dataset, tokenizer_en, tokenizer_pt = get_tokenizers(examples, user_config, VOCAB_SIZE,
+                                                                            shuffle=True)
+
+    return train_dataset, val_dataset, tokenizer_en, tokenizer_pt
+
 
 def tokenize(aligned_lang, unaligned_lang, num_words):
     lang_tokenizer = tf.keras.preprocessing.text.Tokenizer(filters=' ', lower=False, num_words=num_words)
@@ -32,7 +140,8 @@ def tokenize(aligned_lang, unaligned_lang, num_words):
     tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
     return tensor, lang_tokenizer
 
-def preprocess_sentence(w, lang, aligned=True, add_special_tag=True):
+
+def preprocess_sentence_(w, lang, aligned=True, add_special_tag=True):
     w = w.strip()
     if lang == "en" and not aligned:
         # This part is required only for english unaligned samples in word2vec
@@ -49,6 +158,7 @@ def preprocess_sentence(w, lang, aligned=True, add_special_tag=True):
         w = '<start> ' + w + ' <end>'
     return w
 
+
 def load_tokenizers(user_config):
     """
         load pickled tokenizers for input and target language
@@ -64,6 +174,7 @@ def load_tokenizers(user_config):
     tokenizer_inp = pickle.load(open(tokenizer_tar_path, "rb"))
 
     return tokenizer_inp, tokenizer_tar
+
 
 # def load_tokenizers(inp_language, target_language, user_config):
 #     """
@@ -87,16 +198,9 @@ def load_transformer_model(user_config, tokenizer_inp, tokenizer_tar):
     """
     input_vocab_size = 20000
     target_vocab_size = 20000
-    inp_language = user_config["inp_language"]
-    target_language = user_config["target_language"]
 
-    use_pretrained_emb = user_config["use_pretrained_emb"]
-    if use_pretrained_emb:
-        pretrained_weights_inp = np.load(user_config["pretrained_emb_path_{}".format(inp_language)])
-        pretrained_weights_tar = np.load(user_config["pretrained_emb_path_{}".format(target_language)])
-    else:
-        pretrained_weights_inp = None
-        pretrained_weights_tar = None
+    pretrained_weights_inp = None
+    pretrained_weights_tar = None
 
     # custom learning schedule
     learning_rate = CustomSchedule(user_config["transformer_model_dimensions"])
