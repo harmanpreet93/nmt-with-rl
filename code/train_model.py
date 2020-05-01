@@ -1,7 +1,7 @@
 import argparse
 import datetime
 import utils
-from generate_model_predictions import sacrebleu_metric
+from generate_model_predictions import generate_and_save_translations
 import tensorflow as tf
 import os
 import json
@@ -10,19 +10,6 @@ from transformer import create_masks
 import tensorflow_probability as tfp
 import numpy as np
 from time import time
-
-
-# from functools import wraps
-# def timeit(f):
-#     @wraps(f)
-#     def wrap(*args, **kw):
-#         ts = time()
-#         result = f(*args, **kw)
-#         te = time()
-#         print('func:%r took: %2.4f sec' % (f.__name__, te - ts))
-#         return result
-#
-#     return wrap
 
 
 def get_bleu_score(sys, refs):
@@ -66,7 +53,7 @@ def rl_loss_fn(real_seq, pred_seq, tokenizer_tar, pad_token_id):
     mask = tf.cast(mask, dtype=log_probs.dtype)
     log_probs *= mask
     log_probs = tf.reduce_sum(log_probs, axis=1) / tf.reduce_sum(mask, axis=1)  # avg on seq level
-    rl_loss = -(sample_reward - baseline_reward) * log_probs  # batch_size * 1
+    rl_loss = (sample_reward - baseline_reward) * log_probs  # batch_size * 1
     rl_loss = tf.reduce_mean(rl_loss)  # avg on batch level
 
     return rl_loss, np.mean(sample_reward)
@@ -160,9 +147,9 @@ def compute_bleu_score(transformer_model, dataset, user_config, tokenizer_tar, e
     pred_file_path = "../logs/log_{}_{}/".format(inp_language, target_language) + checkpoint_path.split('/')[
         -1] + "_epoch-" + str(epoch) + "_prediction_{}.txt".format(target_language)
 
-    sacrebleu_metric(transformer_model, pred_file_path,
-                     tokenizer_tar, dataset,
-                     max_length=120)
+    generate_and_save_translations(transformer_model, pred_file_path,
+                                   tokenizer_tar, dataset,
+                                   max_length=120)
 
     print("-----------------------------")
     scores = utils.compute_bleu(pred_file_path, val_aligned_path_tar, print_all_scores=False)
@@ -216,7 +203,8 @@ def do_training(user_config):
     # load model and optimizer
     transformer_model, optimizer, ckpt_manager = utils.load_transformer_model(user_config)
 
-    start_epoch = 21
+    start_epoch = 21  # manually setting epoch number for best DL model
+
     epochs = user_config["transformer_epochs"]
     total_steps = 50000 // user_config["transformer_batch_size"] + 1
     print("\nTraining model now...")

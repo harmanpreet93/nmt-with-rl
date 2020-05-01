@@ -8,10 +8,10 @@
 ![alt text](https://github.com/harmanpreet93/nmt-with-rl/blob/master/scripts/rl_alg_results.png)
 
 ### How to train model
-Set your configuration parameters in `code/user_config.json` and to start training run script `bash sccripts/train_transformer_model.sh`
+Set your configuration parameters in `code/user_config.json` and to start training run script `bash scripts/train_model.sh`
 
 
 ### TODO:
 - Add beam search  
 - Label Smoothing
-- Run back-translation iteration for low resource machine translation scenerio 
+- Run back-translation iteration for low resource machine translation scenario

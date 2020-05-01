@@ -1,5 +1,4 @@
 import argparse
-from data_loader import DataLoader
 from transformer import create_masks
 import utils
 import tensorflow as tf
@@ -9,7 +8,7 @@ import json
 """Evaluate"""
 
 
-def sacrebleu_metric(model, pred_file_path, tokenizer_tar, dataset, max_length):
+def generate_and_save_translations(model, pred_file_path, tokenizer_tar, dataset, max_length):
     with open(pred_file_path, "w", buffering=1) as f_pred:
         # evaluation faster in batches
         for batch, (inp_seq, _) in enumerate(dataset):
@@ -77,12 +76,12 @@ def do_evaluation(user_config, pred_file_path):
     transformer_model, optimizer, ckpt_manager = utils.load_transformer_model(user_config)
 
     print("****Generating Translations****")
-    sacrebleu_metric(transformer_model,
-                     pred_file_path,
-                     tokenizer_tar,
-                     test_dataset,
-                     max_length=150
-                     )
+    generate_and_save_translations(transformer_model,
+                                   pred_file_path,
+                                   tokenizer_tar,
+                                   test_dataset,
+                                   max_length=150
+                                   )
 
 
 def main():

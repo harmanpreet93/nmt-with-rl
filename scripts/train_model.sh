@@ -13,13 +13,6 @@ date
 echo ~~~~~~~~~~~~Training Transformer model
 echo
 
-python -u ../code/train_transformer_model.py \
+python -u ../code/train_model.py \
             --config ../code/user_config.json \
-            2>&1 | tee -a ../logs/only_DL.log \
-
-#date
-#echo ~~~~~~~~~~~~Evaluating Transformer model
-#echo
-#
-#python -u ../code/eval_transformer_model.py \
-#            --config ../code/user_config.json \
+            2>&1 | tee -a ../logs/DL_50_RL_50_Pos.log \
