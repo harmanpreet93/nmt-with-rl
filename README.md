@@ -15,3 +15,7 @@ Set your configuration parameters in `code/user_config.json` and to start traini
 - Add beam search  
 - Label Smoothing
 - Run back-translation iteration for low resource machine translation scenerio 
+
+### Authors
+Akshay Singh Rana - 260963467
+Harmanpreet Singh - 260962547
