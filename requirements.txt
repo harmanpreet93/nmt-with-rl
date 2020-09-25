@@ -53,7 +53,7 @@ smart-open==1.8.4
 tensorboard==2.0.2
 tensorboardX==2.0
 tensorflow-estimator==2.0.1
-tensorflow-gpu==2.0.1
+tensorflow-gpu==2.0.3
 termcolor==1.1.0
 tokenizers==0.5.2
 torch==1.4.0
